@@ -4,7 +4,7 @@
 
 cd /root >/dev/null 2>&1
 myvar=$(pwd)
-ver="2025.01.02"
+ver="2025.01.27"
 
 # =============== 默认输入设置 ===============
 RED="\033[31m"
@@ -215,7 +215,7 @@ test_ip_s6=("240e:e1:aa00:4000::24" "2408:80f1:21:5003::a" "2409:8c1e:75b0:3003:
 test_area_b6=("北京电信" "北京联通" "北京移动")
 test_ip_b6=("2400:89c0:1053:3::69" "2400:89c0:1013:3::54" "2409:8c00:8421:1303::55")
 BrowserUA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.74 Safari/537.36"
-Speedtest_Go_version="1.6.12"
+Speedtest_Go_version="1.7.10"
 
 # =============== 基础信息设置 ===============
 REGEX=("debian|astra" "ubuntu" "centos|red hat|kernel|oracle linux|alma|rocky" "'amazon linux'" "fedora" "arch" "freebsd" "alpine" "openbsd" "opencloudos")
@@ -3866,26 +3866,11 @@ fscarmen_route_script() {
     fi
     if [[ ! -z "${ip4}" ]] && [[ "$route_location" != "b6" && "$route_location" != "g6" && "$route_location" != "s6" ]]; then
         if [ "$swhc_mode" = false ]; then
-            _green "核心程序来自ipip.net或nexttrace，请知悉!" >/tmp/ecs/ip.test
+            _green "核心程序来自nexttrace，请知悉!" >/tmp/ecs/ip.test
         else
-            _green "依次测试电信/联通/移动经过的地区及线路，核心程序来自ipip.net或nexttrace，请知悉!" >/tmp/ecs/ip.test
+            _green "依次测试电信/联通/移动经过的地区及线路，核心程序来自nexttrace，请知悉!" >/tmp/ecs/ip.test
         fi
         for ((a = 0; a < ${#test_area_4[@]}; a++)); do
-            # "$TEMP_DIR/$BESTTRACE_FILE" "${test_ip_4[a]}" -g cn 2>/dev/null | sed "s/^[ ]//g" | sed "/^[ ]/d" | sed '/ms/!d' | sed "s#.* \([0-9.]\+ ms.*\)#\1#g" >>/tmp/ip_temp
-            # if [ ! -s "/tmp/ip_temp" ] || grep -q "http: 403" /tmp/ip_temp || grep -q "error" /tmp/ip_temp 2>/dev/null; then
-            #     rm -rf /tmp/ip_temp
-            #     RESULT=$("$TEMP_DIR/$NEXTTRACE_FILE" "${test_ip_4[a]}" --nocolor 2>/dev/null)
-            #     RESULT=$(echo "$RESULT" | grep '^[0-9 ]')
-            #     PART_1=$(echo "$RESULT" | grep '^[0-9]\{1,2\}[ ]\+[0-9a-f]' | awk '{$1="";$2="";print}' | sed "s@^[ ]\+@@g")
-            #     PART_2=$(echo "$RESULT" | grep '\(.*ms\)\{3\}' | sed 's/.* \([0-9*].*ms\).*ms.*ms/\1/g')
-            #     SPACE=' '
-            #     for ((i = 1; i <= $(echo "$PART_1" | wc -l); i++)); do
-            #         [ "$i" -eq 10 ] && unset SPACE
-            #         p_1=$(echo "$PART_2" | sed -n "${i}p") 2>/dev/null
-            #         p_2=$(echo "$PART_1" | sed -n "${i}p") 2>/dev/null
-            #         echo -e "$p_1 \t$p_2" >>/tmp/ip_temp
-            #     done
-            # fi
             rm -rf /tmp/ip_temp
             RESULT=$("$TEMP_DIR/$NEXTTRACE_FILE" "${test_ip_4[a]}" --nocolor 2>/dev/null)
             RESULT=$(echo "$RESULT" | grep '^[0-9 ]')
@@ -4377,8 +4362,10 @@ error_exit() {
 }
 
 build_text() {
-    cd $myvar >/dev/null 2>&1
-    if { [ -n "${menu_mode}" ] && [ "${menu_mode}" = false ]; } || { [ -n "${StartInput}" ] && [ "${StartInput}" -eq 1 ]; } || { [ -n "${StartInput}" ] && [ "${StartInput}" -eq 2 ]; } || { [ -n "${StartInput1}" ] && [ "${StartInput1}" -ge 1 ] && [ "${StartInput1}" -le 4 ]; }; then
+    cd "$myvar" >/dev/null 2>&1
+    if { [ -n "${menu_mode}" ] && [ "${menu_mode}" = false ]; } ||
+        { [ -n "${StartInput}" ] && { [ "${StartInput}" -eq 1 ] || [ "${StartInput}" -eq 2 ]; }; } ||
+        { [ -n "${StartInput1}" ] && [ "${StartInput1}" -ge 1 ] && [ "${StartInput1}" -le 4 ]; }; then
         sed -i -e '1,/-------------------- A Bench Script By spiritlhl ---------------------/d' test_result.txt
         sed -i -e 's/\x1B\[[0-9;]\+[a-zA-Z]//g' test_result.txt
         sed -i -e '/^$/d' test_result.txt
@@ -4397,29 +4384,37 @@ build_text() {
         sed -i -e '/^该运营商\|^测速中/d' test_result.txt
         sed -i -e '/^Running fio test.../d' test_result.txt
         sed -i -e '/^checking speedtest/d' test_result.txt
-        if [ -s test_result.txt ]; then
-            http_short_url=$(curl --ipv4 -sL -m 10 -X POST \
+        # 检查文件大小是否小于 25KB
+        if [ ! -s test_result.txt ]; then
+            echo "The file test_result.txt is empty and has not been uploaded."
+            return
+        fi
+        file_size=$(wc -c <"test_result.txt")
+        if [ "$file_size" -ge 25600 ]; then
+            echo "Files larger than 25KB (${file_size} bytes) are not uploaded."
+            return
+        fi
+        http_short_url=$(curl --ipv4 -sL -m 10 -X POST \
+            -H "Authorization: $ST" \
+            -F "file=@${myvar}/test_result.txt" \
+            "http://hpaste.spiritlhl.net/api/UL/upload")
+        if [ $? -eq 0 ] && [ -n "$http_short_url" ] && echo "$http_short_url" | grep -q "show"; then
+            file_id=$(echo "$http_short_url" | grep -o '[^/]*$')
+            http_short_url="http://hpaste.spiritlhl.net/#/show/${file_id}"
+            https_short_url="https://paste.spiritlhl.net/#/show/${file_id}"
+        else
+            # 如果 HTTP 失败，尝试 HTTPS
+            https_short_url=$(curl --ipv6 -sL -m 10 -X POST \
                 -H "Authorization: $ST" \
                 -F "file=@${myvar}/test_result.txt" \
-                "http://hpaste.spiritlhl.net/api/UL/upload")
-            if [ $? -eq 0 ] && [ -n "$http_short_url" ] && echo "$http_short_url" | grep -q "show"; then
-                file_id=$(echo "$http_short_url" | grep -o '[^/]*$')
+                "https://paste.spiritlhl.net/api/UL/upload")
+            if [ $? -eq 0 ] && [ -n "$https_short_url" ] && echo "$https_short_url" | grep -q "show"; then
+                file_id=$(echo "$https_short_url" | grep -o '[^/]*$')
                 http_short_url="http://hpaste.spiritlhl.net/#/show/${file_id}"
                 https_short_url="https://paste.spiritlhl.net/#/show/${file_id}"
             else
-                # 如果 HTTP 失败，尝试 HTTPS
-                https_short_url=$(curl --ipv6 -sL -m 10 -X POST \
-                    -H "Authorization: $ST" \
-                    -F "file=@${myvar}/test_result.txt" \
-                    "https://paste.spiritlhl.net/api/UL/upload")
-                if [ $? -eq 0 ] && [ -n "$https_short_url" ] && echo "$https_short_url" | grep -q "show"; then
-                    file_id=$(echo "$https_short_url" | grep -o '[^/]*$')
-                    http_short_url="http://hpaste.spiritlhl.net/#/show/${file_id}"
-                    https_short_url="https://paste.spiritlhl.net/#/show/${file_id}"
-                else
-                    http_short_url=""
-                    https_short_url=""
-                fi
+                http_short_url=""
+                https_short_url=""
             fi
         fi
     fi
@@ -4663,6 +4658,10 @@ network_test_script_options() {
         bash <(wget -qO- bash.spiritlhl.net/ecs-ping)
         break_status=true
         ;;
+    16)
+        curl https://vps789.com/public/ping24h/?remarks=from%E8%9E%8D%E5%90%88%E6%80%AA
+        break_status=true
+        ;;
     0)
         original_script
         break_status=true
@@ -4697,6 +4696,7 @@ network_test_script() {
         echo -e "${GREEN}13.${PLAIN} 本人的ecs-net三网测速脚本(自动更新测速节点，对应 speedtest.net)"
         echo -e "${GREEN}14.${PLAIN} 本人的ecs-cn三网测速脚本(自动更新测速节点，对应 speedtest.cn)"
         echo -e "${GREEN}15.${PLAIN} 本人的ecs-ping三网测ping脚本(自动更新测试节点)"
+        echo -e "${GREEN}16.${PLAIN} 开始三网24小时ping测试(执行后回传24小时实时更新的图片地址)"
         echo " -------------"
         echo -e "${GREEN}0.${PLAIN} 回到上一级菜单"
         echo ""
