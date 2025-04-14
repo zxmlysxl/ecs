@@ -4,7 +4,7 @@
 
 cd /root >/dev/null 2>&1
 myvar=$(pwd)
-ver="2025.03.29"
+ver="2025.04.12"
 
 # =============== 默认输入设置 ===============
 RED="\033[31m"
@@ -200,6 +200,7 @@ PID_FILE="/tmp/pids.txt"
 rm -rf "$PID_FILE"
 temp_file_apt_fix="${TEMP_DIR}/apt_fix.txt"
 WorkDir="/tmp/.LemonBench"
+ipv6_condition=false
 test_area_g=("广州电信" "广州联通" "广州移动")
 test_ip_g=("58.60.188.222" "210.21.196.6" "120.196.165.24")
 test_area_s=("上海电信" "上海联通" "上海移动")
@@ -1807,7 +1808,29 @@ download_speedtest_file() {
         return
     fi
     local sys_bit="$1"
+    # Create directory if it doesn't exist
+    if [ ! -d "./speedtest-cli" ]; then
+        mkdir -p "./speedtest-cli"
+    fi
+    # Modified to try speedtest-go first
+    if [ "$sys_bit" = "aarch64" ]; then
+        sys_bit_go="arm64"
+    else
+        sys_bit_go="$sys_bit"
+    fi
+    local url3="https://github.com/showwin/speedtest-go/releases/download/v${Speedtest_Go_version}/speedtest-go_${Speedtest_Go_version}_Linux_${sys_bit_go}.tar.gz"
     if [[ -z "${CN}" || "${CN}" != true ]]; then
+        curl --fail -sL -m 10 -o speedtest.tar.gz "${url3}" || curl --fail -sL -m 15 -o speedtest.tar.gz "${url3}"
+        if [[ $? -eq 0 ]]; then
+            # _green "Successfully downloaded speedtest-go"
+            tar -zxf speedtest.tar.gz -C ./speedtest-cli
+            chmod 777 ./speedtest-cli/speedtest-go
+            rm -rf speedtest.tar.gz*
+            return
+        else
+            # _yellow "Failed to download speedtest-go, falling back to official speedtest-cli"
+            rm -rf speedtest.tar.gz*
+        fi
         if [ "$speedtest_ver" = "1.2.0" ]; then
             local url1="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${sys_bit}.tgz"
             local url2="https://dl.lamp.sh/files/ookla-speedtest-1.2.0-linux-${sys_bit}.tgz"
@@ -1816,41 +1839,28 @@ download_speedtest_file() {
             local url2="https://bintray.com/ookla/download/download_file?file_path=ookla-speedtest-1.0.0-${sys_bit}-linux.tgz"
         fi
         curl --fail -sL -m 10 -o speedtest.tgz "${url1}" || curl --fail -sL -m 10 -o speedtest.tgz "${url2}"
-        if [[ $? -ne 0 ]]; then
-            # _red "Error: Failed to download official speedtest-cli."
+        if [[ $? -eq 0 ]]; then
+            tar -zxf speedtest.tgz -C ./speedtest-cli
+            chmod 777 ./speedtest-cli/speedtest
             rm -rf speedtest.tgz*
-            # _yellow "Try using the unofficial speedtest-go"
+            return
+        else
+            rm -rf speedtest.tgz*
         fi
-        if [ "$sys_bit" = "aarch64" ]; then
-            sys_bit="arm64"
-        fi
-        local url3="https://github.com/showwin/speedtest-go/releases/download/v${Speedtest_Go_version}/speedtest-go_${Speedtest_Go_version}_Linux_${sys_bit}.tar.gz"
-        curl --fail -sL -m 10 -o speedtest.tar.gz "${url3}" || curl --fail -sL -m 15 -o speedtest.tar.gz "${url3}"
     else
-        if [ "$sys_bit" = "aarch64" ]; then
-            sys_bit="arm64"
-        fi
-        local url3="https://github.com/showwin/speedtest-go/releases/download/v${Speedtest_Go_version}/speedtest-go_${Speedtest_Go_version}_Linux_${sys_bit}.tar.gz"
         curl -o speedtest.tar.gz "${cdn_success_url}${url3}" || curl -o speedtest.tar.gz "${url3}"
-        # if [ $? -eq 0 ]; then
-        #     _green "Used unofficial speedtest-go"
-        # fi
+        if [[ $? -eq 0 ]]; then
+            # _green "Used unofficial speedtest-go"
+            tar -zxf speedtest.tar.gz -C ./speedtest-cli
+            chmod 777 ./speedtest-cli/speedtest-go
+            rm -rf speedtest.tar.gz*
+            return
+        else
+            rm -rf speedtest.tar.gz*
+        fi
     fi
-    if [ ! -d "./speedtest-cli" ]; then
-        mkdir -p "./speedtest-cli"
-    fi
-    if [ -f "./speedtest.tgz" ]; then
-        tar -zxf speedtest.tgz -C ./speedtest-cli
-        chmod 777 ./speedtest-cli/speedtest
-        rm -rf speedtest.tgz*
-    elif [ -f "./speedtest.tar.gz" ]; then
-        tar -zxf speedtest.tar.gz -C ./speedtest-cli
-        chmod 777 ./speedtest-cli/speedtest-go
-        rm -rf speedtest.tar.gz*
-    else
-        _red "Error: Failed to download speedtest tool."
-        exit 1
-    fi
+    _red "Error: Failed to download any speedtest tool."
+    exit 1
 }
 
 install_speedtest() {
@@ -1892,7 +1902,8 @@ get_string_length() {
 speed_test() {
     cd $myvar >/dev/null 2>&1
     local nodeName="$2"
-    if [ ! -f "./speedtest-cli/speedtest" ]; then
+    local cmd_status=0
+    if [ -f "./speedtest-cli/speedtest-go" ]; then
         if [ -z "$1" ]; then
             if [ "$usage_timeout" = true ]; then
                 timeout 70s ./speedtest-cli/speedtest-go --ua="${BrowserUA}" >./speedtest-cli/speedtest.log 2>&1
@@ -1906,7 +1917,8 @@ speed_test() {
                 ./speedtest-cli/speedtest-go --server=$1 --ua="${BrowserUA}" >./speedtest-cli/speedtest.log 2>&1
             fi
         fi
-        if [ $? -eq 0 ]; then
+        cmd_status=$?
+        if [ $cmd_status -eq 0 ]; then
             local dl_speed=$(grep -oP 'Download: \K[\d\.]+' ./speedtest-cli/speedtest.log)
             local up_speed=$(grep -oP 'Upload: \K[\d\.]+' ./speedtest-cli/speedtest.log)
             local latency=$(grep -oP 'Latency: \K[\d\.]+' ./speedtest-cli/speedtest.log)
@@ -1932,7 +1944,20 @@ speed_test() {
         else
             ./speedtest-cli/speedtest --progress=no --server-id=$1 --accept-license --accept-gdpr >./speedtest-cli/speedtest.log 2>&1
         fi
-        if [ $? -eq 0 ]; then
+        cmd_status=$?
+        if grep -i "aborted" ./speedtest-cli/speedtest.log >/dev/null 2>&1 ||
+            grep -i "core dumped" ./speedtest-cli/speedtest.log >/dev/null 2>&1 ||
+            [ $cmd_status -ne 0 ]; then
+            # 设置全局错误标记
+            export SPEEDTEST_ERROR=true
+            if [ "$en_status" = true ]; then
+                echo "Error detected: Aborted or core dumped, terminate speed test"
+            else
+                echo "检测到错误：Aborted或core dumped，终止测速"
+            fi
+            return 1
+        fi
+        if [ $cmd_status -eq 0 ]; then
             local dl_speed=$(awk '/Download/{print $3" "$4}' ./speedtest-cli/speedtest.log)
             local up_speed=$(awk '/Upload/{print $3" "$4}' ./speedtest-cli/speedtest.log)
             if [ "$speedtest_ver" = "1.2.0" ]; then
@@ -1973,10 +1998,23 @@ test_list() {
         echo "列表为空，程序退出"
         return
     fi
-    for ((i = 0; i < ${#list[@]}; i += 1)); do
+    export SPEEDTEST_ERROR=false
+    for ((i = 0; i < ${#list[@]}; i++)); do
+        if [ "$SPEEDTEST_ERROR" = true ]; then
+            if [ "$en_status" = true ]; then
+                echo "Previous error detected, stopping further tests"
+            else
+                echo "检测到之前的错误，停止后续测试"
+            fi
+            error_exit
+            break
+        fi
         id=$(echo "${list[i]}" | cut -d',' -f1)
         name=$(echo "${list[i]}" | cut -d',' -f2)
-        speed_test "$id" "$name"
+        speed_test "$id" "$name" || {
+            error_exit
+            break
+        }
     done
 }
 
@@ -2340,6 +2378,10 @@ speed2() {
 # =============== 磁盘测试 部分 ===============
 Run_DiskTest_DD() {
     # 调用方式: Run_DiskTest_DD "测试文件名" "块大小" "写入次数" "测试项目名称"
+    if [ ! -e /dev/null ] || [ ! -c /dev/null ] || [ ! -w /dev/null ]; then
+        error_exit
+        return
+    fi
     mkdir -p /.tmp_LBench/DiskTest >/dev/null 2>&1
     mkdir -p ${WorkDir}/data >/dev/null 2>&1
     local Var_DiskTestResultFile="${WorkDir}/data/disktest_result"
@@ -3035,12 +3077,12 @@ print_intro() {
         echo "              Evaluation Channel: https://t.me/vps_reviews               "
         echo "VPS Fusion Monster Version：$ver"
         echo "Shell Project: https://github.com/spiritLHLS/ecs"
-        echo "Go Project: https://github.com/oneclickvirt/ecs"
+        echo "Go Project [recommend]: https://github.com/oneclickvirt/ecs"
     else
         echo "                   测评频道: https://t.me/vps_reviews                    "
         echo "VPS融合怪版本：$ver"
         echo "Shell项目地址：https://github.com/spiritLHLS/ecs"
-        echo "Go项目地址：https://github.com/oneclickvirt/ecs"
+        echo "Go项目地址 [推荐]：https://github.com/oneclickvirt/ecs"
     fi
 }
 
@@ -3125,6 +3167,7 @@ print_ip_info() {
         fi
         if [[ -n "$ipv6_asn_info" && "$ipv6_asn_info" != "None" ]]; then
             echo " IPV6 ASN          : $(_blue "$ipv6_asn_info")"
+            ipv6_condition=true
         fi
         if [[ -n "$ipv6_location" && "$ipv6_location" != "None" ]]; then
             echo " IPV6 位置         : $(_blue "$ipv6_location")"
@@ -3795,7 +3838,11 @@ backtrace_script() {
     cd $myvar >/dev/null 2>&1
     if [ -f "${TEMP_DIR}/backtrace" ]; then
         chmod 777 ${TEMP_DIR}/backtrace
-        curl_output=$(${TEMP_DIR}/backtrace -s=false 2>&1)
+        if [[ $ipv6_condition == true ]]; then
+            curl_output="$(${TEMP_DIR}/backtrace -s=false -ipv6=true 2>&1)"
+        else
+            curl_output="$(${TEMP_DIR}/backtrace -s=false 2>&1)"
+        fi
     else
         return
     fi
